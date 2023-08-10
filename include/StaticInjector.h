@@ -85,22 +85,23 @@ class StaticInjector{
         //void EdjectDLL(const char* dllname);
 
     private:
-        //int SavePE();
         LPVOID _allocExtendMem();
-        LPVOID _rdataSectionEdit(DWORD rdataPointRVA, LPVOID data, DWORD size);
+        LPVOID _injectData(DWORD rdataPointRVA, LPVOID data, DWORD size);
 
         PEheaderData* pe_data;
+        DWORD extendBy;
 };
 
-StaticInjector::StaticInjector(){
+StaticInjector::StaticInjector(DWORD extendBy){
     this->pe_data = new PEheaderData();
+    this->extendBy = extendBy;
 }
 
 
 int StaticInjector::LoadPE(const char* filename){
     CopyMemory(&(this->pe_data->pe_name), filename, MAXPATH);
 
-    pe_data->file = CreateFileA((LPCSTR)&(this->pe_data->pe_name), GENERIC_ALL, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    pe_data->file = CreateFile((LPCSTR)&(this->pe_data->pe_name), GENERIC_READ | GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (pe_data->file == INVALID_HANDLE_VALUE) printf("Could not read file");
 	
 	_allocExtendMem();
@@ -112,17 +113,20 @@ int StaticInjector::LoadPE(const char* filename){
 LPVOID StaticInjector::_allocExtendMem(){
 
 	this->pe_data->baseFileSize = GetFileSize(this->pe_data->file, NULL);
-	this->pe_data->extendedPartSize = 255;
+	this->pe_data->extendedPartSize = this->extendBy;
 	this->pe_data->extendedFileSize = (this->pe_data->baseFileSize + this->pe_data->extendedPartSize);
+
 	this->pe_data->fileDataBegin = HeapAlloc(GetProcessHeap(), 0, this->pe_data->extendedFileSize);
 
     this->pe_data->baseFileBegAddress = this->pe_data->fileDataBegin;
 	this->pe_data->baseFileEndAddress = (LPVOID)((DWORD)pe_data->fileDataBegin + (DWORD)pe_data->baseFileSize);
-	this->pe_data->editedFileEndAddress = pe_data->baseFileEndAddress;
 
     this->pe_data->editedFileBegAddress = this->pe_data->baseFileBegAddress;
     this->pe_data->editedFileEndAddress = this->pe_data->baseFileEndAddress;
     this->pe_data->editedFileSize = this->pe_data->baseFileSize;
+
+    this->pe_data->extendedFileBegAddress = this->pe_data->baseFileEndAddress;
+    this->pe_data->extendedFileEndAddress = (LPVOID)((DWORD)this->pe_data->extendedFileBegAddress + (DWORD)this->pe_data->extendedPartSize); 
 
 	return pe_data->fileDataBegin;
 }
@@ -153,7 +157,6 @@ void StaticInjector::InjectDLL(const char* dllname){
 		printf("Name: %s\n", this->pe_data->sectionHeader->Name);
 		this->pe_data->sectionHeader = (PIMAGE_SECTION_HEADER)((DWORD)this->pe_data->sectionHeader + sizeof(IMAGE_SECTION_HEADER));
 	}
-    //printf("pe_data->rdataSectionHeader:\t\t%p\n", this->pe_data->rdataSectionHeader);
 
 	DWORD rawOffset = (DWORD)(this->pe_data->baseFileBegAddress) + this->pe_data->idataSectionHeader->PointerToRawData;
 	this->pe_data->importDescriptor = (PIMAGE_IMPORT_DESCRIPTOR)(rawOffset);
@@ -161,15 +164,15 @@ void StaticInjector::InjectDLL(const char* dllname){
 		printf("\t%s\n", rawOffset + (this->pe_data->importDescriptor->Name - this->pe_data->idataSectionHeader->VirtualAddress));
 	}
 
-    //printf("pe_data->rdataSectionHeader->PointerToRawData:\t\t%p\n", pe_data->rdataSectionHeader->PointerToRawData);
+
     rawOffset = (DWORD)this->pe_data->fileDataBegin + (DWORD)this->pe_data->rdataSectionHeader->PointerToRawData;
-    //printf("rawOffset:\t\t%x\n", rawOffset);
+    _injectData(rawOffset, dllname, sizeof((*dllname)));
+    this->pe_data->rdataSectionHeader->SizeOfRawData += sizeof((*dllname));
 
-    //std::wstring _dllname(L"AAAAAAAA");
-    std::string _dllname = "AAAAAAAA";
 
-    _rdataSectionEdit(rawOffset, &_dllname, sizeof(_dllname));
 
+
+    /*
     for(int i = 0; i < 300; ++i){
         if(i % 16 == 0){
             printf("\n%p\t", (DWORD)pe_data->bottomPartBegAddress + i);
@@ -178,14 +181,21 @@ void StaticInjector::InjectDLL(const char* dllname){
         else if(i % 16 != 0){
             printf("%c", *((BYTE*)pe_data->bottomPartBegAddress + i));
         }
-	}
+	}*/
 
-    //WriteFile(this->pe_data->file, this->pe_data->fileDataBegin, this->pe_data->extendedFileSize, &(this->pe_data->bytesWrited), NULL);
+
+    LARGE_INTEGER li;
+    li.QuadPart = 0;
+    SetFilePointerEx(this->pe_data->file, li, NULL, FILE_BEGIN);
+    WriteFile(this->pe_data->file, this->pe_data->fileDataBegin, this->pe_data->editedFileSize, &(this->pe_data->bytesWrited), NULL);
 	//printf("\tbytes read: %d | bytes write: %d", this->pe_data->bytesReaded, this->pe_data->bytesWrited);
+    CloseHandle(this->pe_data->file);
 }
 
 
-LPVOID StaticInjector::_rdataSectionEdit(DWORD rdataPointRVA, LPVOID injection_data, DWORD size){
+LPVOID StaticInjector::_injectData(DWORD rdataPointRVA, LPVOID injection_data, DWORD size){
+
+    printf("data RVA: %p | injection data: %p | size: %d\n\n", (LPVOID)rdataPointRVA, injection_data, size);
 
 	this->pe_data->topPartSize = rdataPointRVA - (DWORD)this->pe_data->baseFileBegAddress;
     this->pe_data->topPartBegAddress = (LPVOID)this->pe_data->baseFileBegAddress;
@@ -201,11 +211,10 @@ LPVOID StaticInjector::_rdataSectionEdit(DWORD rdataPointRVA, LPVOID injection_d
 
     // Write all data from injection pointer to buffer
 	CopyMemory(this->pe_data->bufferPartBegAddress, this->pe_data->bottomPartBegAddress, this->pe_data->bufferPartSize);
+    ZeroMemory(this->pe_data->bottomPartBegAddress, (DWORD)((DWORD)this->pe_data->extendedFileEndAddress - (DWORD)this->pe_data->bottomPartBegAddress));
     
     // Rewrite data from injection pointer by injection_data
-    //printf("pe_data->bottomPartBegAddress: %p | size: %d\n", this->pe_data->bottomPartBegAddress, size);
 	CopyMemory(this->pe_data->bottomPartBegAddress, injection_data, size);
-	//printf("pe_data->bottomPartBegAddress: %p\n", this->pe_data->bottomPartBegAddress);
 
 	this->pe_data->editedFileSize += (size - this->pe_data->bottomPartSize);
     this->pe_data->editedFileBegAddress = this->pe_data->baseFileBegAddress;

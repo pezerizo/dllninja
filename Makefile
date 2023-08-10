@@ -17,7 +17,7 @@ install:
 	g++ $(MAIN) $(INCSDWIN) $(LIBSDWIN) -o $(EXEWIN) -m64 $(LIBSWIN)
 
 clean:
-	rm perecon.exe
+	rm dllninja.exe
 	rm test32.exe
 	rm test64.exe
 	
