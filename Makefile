@@ -19,7 +19,8 @@ install:
 clean:
 	rm perecon.exe
 	rm test32.exe
-
+	rm test64.exe
+	
 dll:
 	g++ -shared -o example.dll example.cpp
 
